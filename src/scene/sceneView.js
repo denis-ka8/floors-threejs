@@ -9,6 +9,7 @@ import Stats from 'three/addons/libs/stats.module.js';
 import FloorsRenderer from "../renderer/floorsRenderer";
 import InstancedBoxRenderer from "../renderer/instancedBoxRenderer";
 import TextBatchRenderer from "../renderer/textBatchRenderer";
+import CameraController from "../controllers/cameraController";
 
 const VIEW_MODE = {
 	Mode2D: "Mode2D",
@@ -46,6 +47,8 @@ class SceneView extends EventEmitter {
 		this._initEnvironment();
 		this._initStats();
 		this._initMouseListeners();
+
+		this._onModeChanged = this._onModeChanged.bind(this);
 	}
 
 	_initEnvironment() {
@@ -193,36 +196,17 @@ class SceneView extends EventEmitter {
 	}
 
 	changeMode() {
-		if (!this._camera || !this._cameraController) return;
+		if (!this._cameraController) return;
 
 		if (this._viewMode === VIEW_MODE.Mode3D) {
 			this._viewMode = VIEW_MODE.Mode2D;
-			this._cameraController.enabled = false;
-			this.animateCameraTransition({
-				targetPosition: new THREE.Vector3(0, 80, 0),
-				targetLookAt: new THREE.Vector3(0, 0, 0),
-				targetUp: new THREE.Vector3(0, 0, -1),
-				onComplete: () => {
-					this._cameraController.enabled = false;
-					this._onModeChanged();
-				}
-			});
+
+			this._cameraController.enableControls(false);
+			this._cameraController.animateCameraTransitionToUp(true);
 		} else {
 			this._viewMode = VIEW_MODE.Mode3D;
-			const initial = this._initialCameraState;
-			if (!initial) return;
-			this.animateCameraTransition({
-				targetPosition: initial.position.clone(),
-				targetLookAt: initial.target.clone(),
-				targetUp: initial.up.clone(),
-				onComplete: () => {
-					this._cameraController.enabled = true;
-					this._cameraController.update();
-					this._onModeChanged();
-				}
-			});
+			this._cameraController.animateCameraTransitionToUp(false);
 		}
-		this._onModeChanged();
 	}
 
 	_onModeChanged() {
@@ -251,95 +235,8 @@ class SceneView extends EventEmitter {
 		this._camera.position.y = cameraModel.position.y;
 		this._camera.position.z = cameraModel.position.z;
 
-		this._initCameraController();
-	}
-
-	_initCameraController() {
-		const controls = new OrbitControls(this._camera, this._renderer.webGLRenderer.domElement);
-		controls.enableDamping = true;
-		controls.dampingFactor = 0.05;
-		controls.screenSpacePanning = false;
-		controls.minDistance = 2;
-		controls.maxDistance = 1000;
-
-		controls.enableKeys = true;
-		controls.keyPanSpeed = 15.0;
-		controls.keys = {
-			LEFT: 'KeyA',
-			UP: 'KeyW',
-			RIGHT: 'KeyD',
-			BOTTOM: 'KeyS'
-		};
-		controls.listenToKeyEvents(window);
-
-		this._cameraController = controls;
-		this._initialCameraState = {
-			position: this._camera.position.clone(),
-			quaternion: this._camera.quaternion.clone(),
-			up: this._camera.up.clone(),
-			target: this._cameraController.target.clone()
-		};
-	}
-
-	animateCameraTransition({
-		targetPosition,
-		targetLookAt,
-		targetUp,
-		onComplete
-	} = {}) {
-		const camera = this._camera;
-		const cameraController = this._cameraController;
-		if (!camera) return;
-
-		const duration = 500;
-		const startPosition = camera.position.clone();
-		const startQuaternion = camera.quaternion.clone();
-		const startTarget = cameraController ? cameraController.target.clone() : null;
-
-		const tempCamera = new THREE.PerspectiveCamera();
-		tempCamera.position.copy(targetPosition);
-		tempCamera.up.copy(targetUp);
-		tempCamera.lookAt(targetLookAt);
-		const targetQuaternion = tempCamera.quaternion.clone();
-
-		if (cameraController) {
-			cameraController.enabled = false;
-		}
-
-		const startTime = performance.now();
-
-		const animate = (currentTime) => {
-			const t = Math.min((currentTime - startTime) / duration, 1);
-
-			camera.position.lerpVectors(startPosition, targetPosition, t);
-			camera.quaternion.slerpQuaternions(startQuaternion, targetQuaternion, t);
-			camera.up.copy(targetUp);
-
-			if (cameraController && startTarget) {
-				cameraController.target.lerpVectors(startTarget, targetLookAt, t);
-			}
-
-			camera.updateMatrix();
-			camera.updateMatrixWorld(true);
-
-			if (t < 1) {
-				requestAnimationFrame(animate);
-			} else {
-				camera.position.copy(targetPosition);
-				camera.up.copy(targetUp);
-				camera.quaternion.copy(targetQuaternion);
-				if (cameraController) {
-					cameraController.target.copy(targetLookAt);
-				}
-				if (typeof onComplete === 'function') {
-					onComplete();
-				} else if (cameraController) {
-					cameraController.update();
-				}
-			}
-		};
-
-		requestAnimationFrame(animate);
+		this._cameraController = new CameraController(this._camera, this._renderer.webGLRenderer.domElement);
+		this._cameraController.on("animationComplete", this._onModeChanged);
 	}
 
 	_onLightAdded(lightModel) {
@@ -384,8 +281,6 @@ class SceneView extends EventEmitter {
 	}
 
 	update() {
-		if (!this._cameraController) return;
-
 		this._cameraController.update();
 
 		this._textRenderer.updateOrientation(this._camera, this._viewMode);
