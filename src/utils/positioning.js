@@ -1,6 +1,8 @@
 import { rect } from "../math/rect";
 import { vec3 } from "../math/vec3";
 
+const DEBUG = true;
+
 function positioningBoxes(data, FLOOR) {
 	const sortedShopsBySquare = data.slice().sort((a,b) => {
 		return b.width * b.depth - a.width * a.depth;
@@ -10,7 +12,7 @@ function positioningBoxes(data, FLOOR) {
 	const FLOOR_TOP = -FLOOR.depth / 2 + FLOOR.position.z;
 	const FLOOR_BOTTOM = FLOOR.depth / 2 + FLOOR.position.z;
 	const FLOOR_RIGHT = FLOOR.width / 2 + FLOOR.position.z;
-	console.log(`начальный периметр: сверху = ${FLOOR_TOP}, снизу = ${FLOOR_BOTTOM}, слева = ${FLOOR_LEFT}, справа = ${FLOOR_RIGHT}`)
+	DEBUG && console.log(`начальный периметр: сверху = ${FLOOR_TOP}, снизу = ${FLOOR_BOTTOM}, слева = ${FLOOR_LEFT}, справа = ${FLOOR_RIGHT}`)
 
 	let leftSidePerimeter = rect(FLOOR_TOP, FLOOR_LEFT, FLOOR_BOTTOM, FLOOR_LEFT);
 	let rightSidePerimeter = rect(FLOOR_TOP, FLOOR_RIGHT, FLOOR_BOTTOM, FLOOR_RIGHT);
@@ -63,18 +65,18 @@ function positioningBoxes(data, FLOOR) {
 
 		i++;
 	}
-	console.log(`смещение периметра после размещения угловых и у стен: сверху = ${topSidePerimeter.bottom-FLOOR_TOP}, снизу = ${FLOOR_BOTTOM-bottomSidePerimeter.top}, слева = ${leftSidePerimeter.right-FLOOR_LEFT}, справа = ${FLOOR_RIGHT-rightSidePerimeter.left}`)
+	DEBUG && console.log(`смещение периметра после размещения угловых и у стен: сверху = ${topSidePerimeter.bottom-FLOOR_TOP}, снизу = ${FLOOR_BOTTOM-bottomSidePerimeter.top}, слева = ${leftSidePerimeter.right-FLOOR_LEFT}, справа = ${FLOOR_RIGHT-rightSidePerimeter.left}`)
 
 	// Calculate center perimeter excluding route width
 	let centerPerimeter = rect(topSidePerimeter.bottom, rightSidePerimeter.left, bottomSidePerimeter.top, leftSidePerimeter.right);
-	console.log(`новый периметр: сверху = ${centerPerimeter.top}, снизу = ${centerPerimeter.bottom}, слева = ${centerPerimeter.left}, справа = ${centerPerimeter.right}`)
+	DEBUG && console.log(`новый периметр: сверху = ${centerPerimeter.top}, снизу = ${centerPerimeter.bottom}, слева = ${centerPerimeter.left}, справа = ${centerPerimeter.right}`)
 
-	console.log(`проходнвя дорожка = ${FLOOR.loopRouteWidth}`);
+	DEBUG && console.log(`проходнвя дорожка = ${FLOOR.loopRouteWidth}`);
 	centerPerimeter.top += FLOOR.loopRouteWidth;
 	centerPerimeter.bottom -= FLOOR.loopRouteWidth;
 	centerPerimeter.left += FLOOR.loopRouteWidth;
 	centerPerimeter.right -= FLOOR.loopRouteWidth;
-	console.log(`новый периметр без учета дорожки: сверху = ${centerPerimeter.top}, снизу = ${centerPerimeter.bottom}, слева = ${centerPerimeter.left}, справа = ${centerPerimeter.right}`)
+	DEBUG && console.log(`новый периметр без учета дорожки: сверху = ${centerPerimeter.top}, снизу = ${centerPerimeter.bottom}, слева = ${centerPerimeter.left}, справа = ${centerPerimeter.right}`)
 
 	// STEP 3: Position shops on horizontal line
 	const centerPerimeterOrigin = centerPerimeter.copy();
@@ -91,7 +93,7 @@ function positioningBoxes(data, FLOOR) {
 
 	if (lastIndex === 0 && sortedShopsWidth.length) {
 		// TODO: rotate
-		console.warn("Не хватает площади");
+		// console.warn("Не хватает площади");
 	}
 }
 
@@ -136,11 +138,11 @@ function positioningHorizontalLine(data, perimeter, centerPerimeterOrigin, FLOOR
 		shop.position.z += dz;
 	}
 
-	console.log(`гориз. ряд 1 = ${firstRowDepth}`)
-	console.log(`гориз. ряд 2 = ${secondRowDepth}`)
+	DEBUG && console.log(`гориз. ряд 1 = ${firstRowDepth}`)
+	DEBUG && console.log(`гориз. ряд 2 = ${secondRowDepth}`)
 	centerPerimeterOrigin.top += firstRowDepth + secondRowDepth + FLOOR.loopRouteWidth;
 
-	console.log(`центральный периметр без гориз. ряда и дорожки: сверху = ${centerPerimeterOrigin.top}, снизу = ${centerPerimeterOrigin.bottom}, слева = ${centerPerimeterOrigin.left}, справа = ${centerPerimeterOrigin.right}`)
+	DEBUG && console.log(`центральный периметр без гориз. ряда и дорожки: сверху = ${centerPerimeterOrigin.top}, снизу = ${centerPerimeterOrigin.bottom}, слева = ${centerPerimeterOrigin.left}, справа = ${centerPerimeterOrigin.right}`)
 	return i;
 }
 

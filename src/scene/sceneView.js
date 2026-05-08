@@ -1,5 +1,6 @@
 import EventEmitter from "../utils/eventEmitter";
 import Color from "../utils/color";
+import { throttle } from "../utils/throttle";
 
 import * as THREE from "three";
 import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
@@ -10,6 +11,8 @@ import FloorsRenderer from "../renderer/floorsRenderer";
 import InstancedBoxRenderer from "../renderer/instancedBoxRenderer";
 import TextBatchRenderer from "../renderer/textBatchRenderer";
 import CameraController from "../controllers/cameraController";
+import RaycastManager from "../managers/raycastManager";
+import InputHandler from "../handlers/inputHandler";
 
 const VIEW_MODE = {
 	Mode2D: "Mode2D",
@@ -21,29 +24,22 @@ class SceneView extends EventEmitter {
 	constructor(sceneModel, renderer) {
 		super();
 
+		this._initialized = false;
 		this._viewMode = VIEW_MODE.Mode3D;
 		this._drawableObjects = new Map(); // Map of modelId to drawable object
 		this._shopModels = [];
 		this._boxModelToShop = new Map(); // Map of boxModel.id to shopModel
 
 		this._sceneModel = sceneModel;
+		this._sceneModel.on('cameraAdded', this._onCameraAdded.bind(this));
+		this._sceneModel.on('lightAdded', this._onLightAdded.bind(this));
+		this._sceneModel.on('objectAdded', this._onObjectAdded.bind(this));
 		
 		this._scene = new THREE.Scene();
 		this._renderer = new FloorsRenderer();
 		this._boxRenderer = new InstancedBoxRenderer();
 		this._textRenderer = new TextBatchRenderer();
 
-		// Raycast setup
-		this._raycaster = new THREE.Raycaster();
-		this._mouse = new THREE.Vector2();
-		this._raycastContainer = new THREE.Group();
-		this._scene.add(this._raycastContainer);
-		this._hoveredBoxIndex = -1;
-		
-		this._sceneModel.on('cameraAdded', this._onCameraAdded.bind(this));
-		this._sceneModel.on('lightAdded', this._onLightAdded.bind(this));
-		this._sceneModel.on('objectAdded', this._onObjectAdded.bind(this));
-		
 		this._initEnvironment();
 		this._initStats();
 		this._initMouseListeners();
@@ -74,105 +70,53 @@ class SceneView extends EventEmitter {
 		document.body.appendChild(this._stats.dom);
 	}
 
+	_initRaycast() {
+  		const instancedMesh = this._boxRenderer.getInstancedMesh();
+		this._raycastManager = new RaycastManager(this._camera);
+		this._raycastManager.setRaycastTarget(instancedMesh);
+
+		this._inputHandler = new InputHandler(
+			this._raycastManager,
+			this._boxRenderer,
+			this._boxModelToShop
+		);
+	}
+
 	_initMouseListeners() {
-		window.addEventListener('mousemove', (event) => this._onMouseMove(event), false);
+		const throttledMouseMove = throttle((event) => this._onMouseMove(event), 30);
+
+		window.addEventListener('mousemove', throttledMouseMove, false);
 		window.addEventListener('click', (event) => this._onClick(event), false);
 	}
 
 	_onMouseMove(event) {
-		// Calculate normalized mouse coordinates
-		this._mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-		this._mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
 		if (!this._camera) return;
-
-		// Raycast
-		this._raycaster.setFromCamera(this._mouse, this._camera);
-		const intersects = this._raycaster.intersectObjects(this._raycastContainer.children);
-
-		// Restore previous hovered box color
-		if (this._hoveredBoxIndex >= 0) {
-			const boxModel = this._boxRenderer.getBoxModelByInstanceIndex(this._hoveredBoxIndex);
-			if (boxModel) {
-				this._boxRenderer.updateBoxColorByIndex(this._hoveredBoxIndex, boxModel.color);
-			}
-		}
-
-		this._hoveredBoxIndex = -1;
-
-		// Check if hovering over a box
-		if (intersects.length > 0) {
-			const intersected = intersects[0].object;
-			const boxIndex = intersected.userData.boxIndex;
-			
-			if (boxIndex !== undefined) {
-				this._hoveredBoxIndex = boxIndex;
-				// Increase color intensity on hover
-				const boxModel = this._boxRenderer.getBoxModelByInstanceIndex(boxIndex);
-				if (boxModel) {
-					const originalColor = new THREE.Color(boxModel.color);
-					
-					// Increase brightness
-					const hsl = {};
-					originalColor.getHSL(hsl);
-					hsl.l = Math.min(1, hsl.l + 0.3);
-					const brightColor = new THREE.Color().setHSL(hsl.h, hsl.s, hsl.l);
-					this._boxRenderer.updateBoxColorByIndex(boxIndex, brightColor);
-				}
-			}
-		}
+		if (!this._initialized) return;
+		this._inputHandler.handleMouseMove(
+			event.clientX,
+			event.clientY,
+			window.innerWidth,
+			window.innerHeight
+		);
 	}
 
 	_onClick(event) {
-		if (this._hoveredBoxIndex < 0) return;
-
-		const boxModel = this._boxRenderer.getBoxModelByInstanceIndex(this._hoveredBoxIndex);
-		if (!boxModel) return;
-
-		const shopModel = this._boxModelToShop.get(boxModel.id);
-		if (shopModel) {
-			console.log(shopModel.name, shopModel);
-		}
+		if (!this._initialized) return;
+		this._inputHandler.handleClick();
 	}
 
 	initializeShopModels(shopModels) {
 		this._shopModels = shopModels;
 
-		let boxIndex = 0;
 		for (const shop of shopModels) {
 			for (const renderModel of shop.getRenderableModels()) {
 				if (renderModel.constructor.name === "BoxModel") {
 					this._boxRenderer.addBoxModel(renderModel);
 					this._boxModelToShop.set(renderModel.id, shop);
 
-					// Create invisible raycast box
-					const raycastGeometry = new THREE.BoxGeometry(
-						renderModel.width,
-						renderModel.height,
-						renderModel.depth
-					);
-					const raycastMaterial = new THREE.MeshBasicMaterial({
-						transparent: true,
-						opacity: 0,
-						wireframe: false
-					});
-					const raycastMesh = new THREE.Mesh(raycastGeometry, raycastMaterial);
-					raycastMesh.position.copy(renderModel.position);
-					raycastMesh.userData.boxIndex = boxIndex++;
-					raycastMesh.userData.boxModel = renderModel;
-					this._raycastContainer.add(raycastMesh);
-
 					renderModel.on("modelUpdated", (model, changes) => {
 						if (changes.hasOwnProperty("height")) {
 							this._boxRenderer.updateBoxHeight(renderModel);
-							// Update raycast mesh height
-							const foundRaycastMesh = this._raycastContainer.children.find(
-								mesh => mesh.userData.boxModel === renderModel
-							);
-							if (foundRaycastMesh) {
-								foundRaycastMesh.scale.y = renderModel.height;
-								foundRaycastMesh.position.y = renderModel.position.y;
-							}
 							this._updateRelatedTextPosition(shop);
 						}
 					});
@@ -185,6 +129,8 @@ class SceneView extends EventEmitter {
 		this._boxRenderer.finalize();
 		this._scene.add(this._boxRenderer.getInstancedMesh());
 		this._scene.add(this._textRenderer.getContainer());
+
+		this._initialized = true;
 	}
 
 	_updateRelatedTextPosition(shop) {
@@ -237,6 +183,8 @@ class SceneView extends EventEmitter {
 
 		this._cameraController = new CameraController(this._camera, this._renderer.webGLRenderer.domElement);
 		this._cameraController.on("animationComplete", this._onModeChanged);
+
+		this._initRaycast();
 	}
 
 	_onLightAdded(lightModel) {
@@ -250,8 +198,6 @@ class SceneView extends EventEmitter {
 				light.position.set(lightModel.position.x, lightModel.position.y, lightModel.position.z);
 				light.target.position.set(lightModel.direction.x, lightModel.direction.y, lightModel.direction.z);
 				this._scene.add(light.target);
-				// this._helper = new THREE.DirectionalLightHelper(light, 5);
-				// this._scene.add(this._helper);
 				break;
 			default:
 				console.warn(`Unknown light model type ${lightModel.constructor.name} added to the scene model. It will not be rendered.`);
